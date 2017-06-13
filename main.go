@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	_ "github.com/lib/pq"
 	"github.com/jmoiron/sqlx"
+	"os"
 )
 
 const (
@@ -14,11 +15,13 @@ const (
 	user     = "postgres"
 	password = "postgres"
 	dbname   = "postgres"
+  sslmode = "disable"
 )
 
+
 func connect() *sql.DB {
-	t := "host=%s port=%d user=%s password=%s dbname=%s sslmode=disable"
-	connectionString := fmt.Sprintf(t, host, port, user, password, dbname)
+	t := "host=%s port=%d user=%s password=%s dbname=%s sslmode=%s"
+	connectionString := fmt.Sprintf(t, host, port, user, password, dbname, sslmode)
 	db, err := sql.Open("postgres", connectionString)
 	if err != nil {
 		log.Fatal(err)
@@ -111,6 +114,31 @@ func populateDB(db *sql.DB) {
 }
 
 
+func populateDBx(db *sqlx.DB) {
+	data := []Genius{
+		{"Charles Dickens", 165, "English"},
+		{"Rafael", 170, "Italian"},
+		{"Michael Faraday", 175, "English"},
+		{"Baruch Spinoza", 175, "Dutch"},
+		{"Michaelangelo", 177, "Italian"},
+		{"Desiderius Erasmus", 177, "Dutch"},
+		{"Rene Descartes", 177, "French"},
+		{"Galileo Galilei", 182, "Italian"},
+		{"John Stuart Mill", 182, "English"},
+		{"Gottfried Wilhelm Leibnitz", 191, "German"},
+		{"Isaac Newton", 192, "English"},
+		{"Leonardo Da Vinci", 200, "Italian"},
+		{"Johann Wolfgang von Goethe", 220, "German"},
+	}
+
+	for _, g := range data {
+		t := "INSERT INTO genius (name, iq, nationality) VALUES ('%s', %d, '%s')"
+		command := fmt.Sprintf(t, g.Name, g.IQ, g.Nationality)
+		db.MustExec(command)
+	}
+}
+
+
 func getEnglishGeniuses(db *sql.DB) {
 	rows, err := db.Query("SELECT name, iq FROM genius WHERE nationality='English'")
 	if err != nil {
@@ -138,23 +166,53 @@ func getEnglishGeniusesx(db *sqlx.DB) {
 	}
 }
 
+func increaseIntelligenceOfDutchGeniusesx(db *sqlx.DB) {
+	geniuses := []Genius{}
+	db.Select(&geniuses, "SELECT name, iq FROM genius WHERE nationality='Dutch'")
+	tx, err := db.Beginx()
+	if err != nil {
+		panic("Can't start transaction")
+	}
+
+	for _, g := range geniuses {
+		t := "UPDATE genius SET iq = %d WHERE name = '%s'"
+		command := fmt.Sprintf(t, g.IQ + 10, g.Name)
+		_, err = tx.Exec(command)
+		if err != nil {
+			fmt.Println("Rolling back transaction")
+			tx.Rollback()
+			return
+		}
+	}
+	tx.Commit()
+}
+
 
 func main() {
-	//db := connect()
-	//defer db.Close()
-	//
-	//createSchema(db)
-	//cleanDB(db)
-	//populateDB(db)
-	//
-	//getEnglishGeniuses(db)
+	useSqlx := len(os.Args) > 1 && os.Args[1] == "--use-sqlx"
+	if useSqlx {
+		fmt.Println("--- Using sqlx")
+		db := connectx()
+		defer db.Close()
 
-	db := connectx()
-	defer db.Close()
+		createSchemax(db)
+		db.MustExec("DELETE FROM genius")
+		populateDBx(db)
 
-	createSchemax(db)
-	cleanDB(db.DB)
-	populateDB(db.DB)
+		getEnglishGeniusesx(db)
+		increaseIntelligenceOfDutchGeniusesx(db)
 
-	getEnglishGeniusesx(db)
+
+
+	} else {
+		fmt.Println("--- Using database/sql")
+		db := connect()
+		defer db.Close()
+
+		createSchema(db)
+		cleanDB(db)
+		populateDB(db)
+
+		getEnglishGeniuses(db)
+	}
 }
